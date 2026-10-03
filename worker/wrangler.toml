@@ -1,0 +1,56 @@
+# Cloudflare Worker + D1 — no PC, no VPS, runs 24/7.
+# Deploy:  npx wrangler deploy
+# Secrets (never in this file): IG_APP_SECRET, IG_VERIFY_TOKEN, IG_ACCESS_TOKEN,
+#                               LLM_API_KEY, ADMIN_TOKEN
+
+name = "ig-autoreply"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+
+# The database id is filled in automatically by `wrangler d1 create`.
+[[d1_databases]]
+binding = "DB"
+database_name = "ig-autoreply"
+database_id = "b2043fe6-2a46-478c-b3e6-774839a0fb36"
+
+# Safety net: every minute, answer any thread whose last message is unanswered
+# (covers a lost debounce job, a redeploy, or an eviction).
+[triggers]
+crons = ["*/1 * * * *"]
+
+[observability]
+enabled = true
+
+[vars]
+# --- safety ---
+DRY_RUN = "false"                # live: replies really go out
+
+# --- instagram ---
+IG_HOST = "https://graph.instagram.com"
+IG_API_VERSION = "v25.0"
+IG_USER_ID = "me"
+IG_TYPING = "true"
+
+# --- behaviour ---
+DEBOUNCE_SECONDS = "1"           # wait this long for the person to finish typing
+HISTORY_TURNS = "8"              # messages of context; more = slower, not smarter
+REPLY_MAX_CHARS = "200"          # hard cap; the prompt asks for one sentence
+WINDOW_HOURS = "24"
+SWEEP_GRACE_SECONDS = "20"       # sweep only touches work this far past due
+HANDOFF_KEYWORDS = ""
+HANDOFF_MODE = "auto"            # auto = still send · hold = queue for a human
+
+# --- llm (merge.dev gateway) ---
+# Measured on a real DM turn: gemini-3.7-flash burns ~295 output tokens of hidden
+# reasoning for an 18-character reply (3.2s). openai/gpt-6-luna answers a full
+# Banglish sentence in ~3.0s with no wasted reasoning tokens and much more
+# natural Banglish. flash-lite is the fallback: fastest, cleanest JSON, if luna
+# is ever unavailable.
+LLM_BASE_URL = "https://api-gateway.merge.dev/v1"
+LLM_MODEL = "openai/gpt-6-luna"
+LLM_FALLBACK_MODEL = "google/gemini-2.5-flash-lite"
+# Headroom, not verbosity: at 200 a long-winded turn gets cut mid-JSON, and a
+# truncated object used to be sent to the customer verbatim. The reply itself is
+# capped at REPLY_MAX_CHARS anyway.
+LLM_MAX_TOKENS = "400"
+LLM_TIMEOUT_MS = "45000"
